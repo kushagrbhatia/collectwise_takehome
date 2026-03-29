@@ -56,3 +56,31 @@ If the same `account_number` appears more than once in a single CSV, the last oc
 ```bash
 npm test
 ```
+
+## Deployment (Railway)
+
+### Prerequisites
+
+- A [Railway](https://railway.app) account
+- The repo pushed to GitHub
+
+### Steps
+
+1. Go to [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub repo**
+2. Select this repository
+3. Railway auto-detects Node.js and runs `npm start`
+4. Once deployed, Railway provides a public URL (e.g. `https://<app-name>.railway.app`)
+
+### How it works
+
+On each deploy, `npm start` seeds the database from `atlas_inventory.csv` then starts the server. The SQLite database lives on the container filesystem — no external database required.
+
+### Environment variables
+
+None required. Railway sets `PORT` automatically.
+
+### Calling the API
+
+```bash
+curl https://<app-name>.railway.app/accounts/ACC001
+```
