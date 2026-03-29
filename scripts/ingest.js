@@ -48,6 +48,10 @@ function runIngestion(db, rows) {
         inbound = @inbound, outbound = @outbound, updated_at = @updated_at
     WHERE account_number = @account_number
   `);
+  const archiveAndUpdate = db.transaction((existing, parsed, now) => {
+    archiveStmt.run({ ...existing, archived_at: now });
+    updateStmt.run({ ...parsed, updated_at: now });
+  });
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
@@ -76,8 +80,7 @@ function runIngestion(db, rows) {
       insertStmt.run({ ...parsed, created_at: now, updated_at: now });
       stats.inserted++;
     } else if (hasChanged(existing, parsed)) {
-      archiveStmt.run({ ...existing, archived_at: now });
-      updateStmt.run({ ...parsed, updated_at: now });
+      archiveAndUpdate(existing, parsed, now);
       stats.updated++;
     } else {
       stats.skipped++;
