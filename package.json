@@ -1,0 +1,15 @@
+{
+  "name": "collectwise-take-home",
+  "version": "1.0.0",
+  "scripts": {
+    "ingest": "node scripts/ingest.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "csv-parse": "^5.5.3"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
