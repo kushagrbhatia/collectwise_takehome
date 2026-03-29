@@ -35,6 +35,7 @@ function initSchema(db) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_archived_debtors_account_number ON archived_debtors(account_number);
+    CREATE INDEX IF NOT EXISTS idx_archived_debtors_phone_number ON archived_debtors(phone_number);
   `);
 }
 
