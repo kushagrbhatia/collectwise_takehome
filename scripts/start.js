@@ -13,10 +13,15 @@ initSchema(db);
 
 const csvPath = path.join(process.cwd(), 'atlas_inventory.csv');
 if (fs.existsSync(csvPath)) {
-  const content = fs.readFileSync(csvPath, 'utf8');
-  const rows = parse(content, { columns: true, skip_empty_lines: true });
-  const stats = runIngestion(db, rows);
-  console.log(`DB seeded: ${stats.inserted} inserted, ${stats.updated} updated, ${stats.skipped} skipped, ${stats.errored} errored`);
+  try {
+    const content = fs.readFileSync(csvPath, 'utf8');
+    const rows = parse(content, { columns: true, skip_empty_lines: true });
+    const stats = runIngestion(db, rows);
+    console.log(`DB seeded: ${stats.inserted} inserted, ${stats.updated} updated, ${stats.skipped} skipped, ${stats.errored} errored`);
+  } catch (err) {
+    console.error(`Failed to seed DB from CSV: ${err.message}`);
+    console.warn('Starting with existing DB state');
+  }
 } else {
   console.warn(`Warning: atlas_inventory.csv not found at ${csvPath}, starting with existing DB`);
 }
