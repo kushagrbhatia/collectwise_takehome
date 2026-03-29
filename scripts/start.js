@@ -27,6 +27,13 @@ if (fs.existsSync(csvPath)) {
 }
 
 const app = createApp(db);
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
+});
+
+process.on('SIGTERM', () => {
+  server.close(() => {
+    dbModule.close();
+    process.exit(0);
+  });
 });
