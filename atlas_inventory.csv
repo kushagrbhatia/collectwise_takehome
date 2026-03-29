@@ -1,0 +1,5 @@
+account_number,debtor_name,phone_number,balance,status,client_name,entry_date,inbound,outbound
+ACC001,John Doe,555-1234,1500.00,active,Atlas Recovery,2024-01-15,1,0
+ACC002,Jane Smith,555-5678,2300.50,pending,Atlas Recovery,2024-01-20,0,1
+ACC003,Bob Johnson,,500.00,closed,Atlas Recovery,2024-02-01,0,0
+ACC004,Alice Brown,555-9999,-100.00,active,Atlas Recovery,,1,1
