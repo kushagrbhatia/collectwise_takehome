@@ -46,6 +46,11 @@ function validateRow(row, rowNum) {
   const inbound = (row.inbound === '1' || row.inbound === 1) ? 1 : 0;
   const outbound = (row.outbound === '1' || row.outbound === 1) ? 1 : 0;
 
+  // Mutual exclusivity — a call cannot be both inbound and outbound
+  if (inbound === 1 && outbound === 1) {
+    errors.push(`${loc()}: inbound and outbound cannot both be 1`);
+  }
+
   const parsed = {
     account_number: acct || null,
     debtor_name: row.debtor_name ? row.debtor_name.trim() : null,

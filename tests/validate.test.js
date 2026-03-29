@@ -116,6 +116,15 @@ describe('validateRow', () => {
     expect(result.parsed.outbound).toBe(0);
   });
 
+  test('both inbound and outbound set to 1 is a hard error', () => {
+    const row = baseRow();
+    row.inbound = '1';
+    row.outbound = '1';
+    const result = validateRow(row, 2);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.some(e => /inbound/i.test(e) && /outbound/i.test(e))).toBe(true);
+  });
+
   test('includes row number in error messages', () => {
     const row = baseRow();
     row.account_number = '';
