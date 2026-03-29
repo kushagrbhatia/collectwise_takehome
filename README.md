@@ -1,6 +1,6 @@
-# CollectWise Take Home — Atlas Recovery CSV Ingestion
+# CollectWise Take Home — Atlas Recovery Account Lookup
 
-Node.js script that ingests a CSV file of debtor accounts into a SQLite database, with validation, change-detection upserts, and historical archiving.
+Node.js service that ingests a CSV file of debtor accounts into a SQLite database and exposes an HTTP API for account lookup, with validation, change-detection upserts, and historical archiving.
 
 ## Setup
 
@@ -51,6 +51,54 @@ If the same `account_number` appears more than once in a single CSV, the last oc
 | `inbound` | No | 0 or 1; defaults to 0 if missing or invalid |
 | `outbound` | No | 0 or 1; defaults to 0 if missing or invalid |
 
+## API
+
+### Run locally
+
+```bash
+npm start
+```
+
+Seeds the database from `atlas_inventory.csv` then starts the server on port 3000.
+
+### Endpoint
+
+```
+GET /accounts/:accountNumber
+```
+
+**200 — account found:**
+
+```json
+{
+  "account_number": "ACC001",
+  "debtor_name": "John Doe",
+  "phone_number": "555-1234",
+  "balance": 1500,
+  "status": "active",
+  "client_name": "Atlas Recovery"
+}
+```
+
+**404 — account not found:**
+
+```json
+{
+  "error": "Account not found",
+  "account_number": "ACC999"
+}
+```
+
+**Example:**
+
+```bash
+# Local
+curl http://localhost:3000/accounts/ACC001
+
+# Deployed
+curl https://collectwisetakehome-production.up.railway.app/accounts/ACC001
+```
+
 ## Tests
 
 ```bash
@@ -82,5 +130,6 @@ None required. Railway sets `PORT` automatically.
 ### Calling the API
 
 ```bash
-curl https://<app-name>.railway.app/accounts/ACC001
+curl https://collectwisetakehome-production.up.railway.app/accounts/ACC001
+curl https://collectwisetakehome-production.up.railway.app/accounts/NOTEXIST
 ```
