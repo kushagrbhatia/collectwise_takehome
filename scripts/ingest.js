@@ -1,3 +1,6 @@
+const fs = require('fs');
+const path = require('path');
+const { parse } = require('csv-parse/sync');
 const { validateRow } = require('./validate');
 
 const BUSINESS_COLS = [
@@ -56,8 +59,9 @@ async function runIngestion(pool, rows) {
       );
       stats.inserted++;
     } else if (hasChanged(existing, parsed)) {
-      const client = await pool.connect();
+      let client;
       try {
+        client = await pool.connect();
         await client.query('BEGIN');
         await client.query(
           `INSERT INTO archived_debtors
@@ -80,10 +84,10 @@ async function runIngestion(pool, rows) {
         await client.query('COMMIT');
         stats.updated++;
       } catch (err) {
-        await client.query('ROLLBACK');
+        if (client) await client.query('ROLLBACK').catch(() => {});
         throw err;
       } finally {
-        client.release();
+        if (client) client.release();
       }
     } else {
       stats.skipped++;
@@ -94,10 +98,6 @@ async function runIngestion(pool, rows) {
 }
 
 async function main() {
-  const fs = require('fs');
-  const path = require('path');
-  const { parse } = require('csv-parse/sync');
-
   const args = process.argv.slice(2);
   const fileIdx = args.indexOf('--file');
   const filePath = fileIdx !== -1 && args[fileIdx + 1]
@@ -109,10 +109,10 @@ async function main() {
     process.exit(1);
   }
 
-  const { getPool } = require('../db/database');
+  const { createPool } = require('../db/database');
   const initSchema = require('../db/schema');
 
-  const pool = getPool();
+  const pool = createPool();
   await initSchema(pool);
 
   const content = fs.readFileSync(filePath, 'utf8');
