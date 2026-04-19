@@ -1,47 +1,68 @@
-const db = require('../db/database');
+const { newDb } = require('pg-mem');
 const initSchema = require('../db/schema');
 
+function makePool() {
+  const mem = newDb();
+  const { Pool } = mem.adapters.createPg();
+  return new Pool();
+}
+
 describe('schema', () => {
-  let conn;
+  let pool;
 
   beforeEach(() => {
-    conn = db.open(':memory:');
-    initSchema(conn);
+    pool = makePool();
   });
 
-  afterEach(() => {
-    db.close();
+  afterEach(async () => {
+    await pool.end();
   });
 
-  test('debtors table exists with expected columns', () => {
-    const info = conn.prepare("PRAGMA table_info('debtors')").all();
-    const cols = info.map(r => r.name);
+  test('debtors table exists with expected columns', async () => {
+    await initSchema(pool);
+    const result = await pool.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'debtors'`
+    );
+    const cols = result.rows.map(r => r.column_name);
     expect(cols).toEqual(expect.arrayContaining([
       'id', 'account_number', 'debtor_name', 'phone_number',
       'balance', 'status', 'client_name', 'entry_date',
-      'inbound', 'outbound', 'created_at', 'updated_at'
+      'inbound', 'outbound', 'created_at', 'updated_at',
     ]));
   });
 
-  test('archived_debtors table exists with expected columns', () => {
-    const info = conn.prepare("PRAGMA table_info('archived_debtors')").all();
-    const cols = info.map(r => r.name);
+  test('archived_debtors table exists with expected columns', async () => {
+    await initSchema(pool);
+    const result = await pool.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'archived_debtors'`
+    );
+    const cols = result.rows.map(r => r.column_name);
     expect(cols).toEqual(expect.arrayContaining([
       'id', 'account_number', 'debtor_name', 'phone_number',
       'balance', 'status', 'client_name', 'entry_date',
-      'inbound', 'outbound', 'created_at', 'updated_at', 'archived_at'
+      'inbound', 'outbound', 'created_at', 'updated_at', 'archived_at',
     ]));
   });
 
-  test('debtors has unique constraint on account_number', () => {
+  test('debtors has unique constraint on account_number', async () => {
+    await initSchema(pool);
     const now = new Date().toISOString();
-    conn.prepare(`INSERT INTO debtors (account_number, debtor_name, balance, status, client_name, created_at, updated_at) VALUES ('ACC001', 'Test', 100, 'active', 'Client', ?, ?)`).run(now, now);
-    expect(() => {
-      conn.prepare(`INSERT INTO debtors (account_number, debtor_name, balance, status, client_name, created_at, updated_at) VALUES ('ACC001', 'Test2', 200, 'active', 'Client', ?, ?)`).run(now, now);
-    }).toThrow();
+    await pool.query(
+      `INSERT INTO debtors (account_number, debtor_name, balance, status, client_name, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      ['ACC001', 'Test', 100, 'active', 'Client', now, now]
+    );
+    await expect(
+      pool.query(
+        `INSERT INTO debtors (account_number, debtor_name, balance, status, client_name, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        ['ACC001', 'Test2', 200, 'active', 'Client', now, now]
+      )
+    ).rejects.toThrow();
   });
 
-  test('initSchema is idempotent — safe to call twice', () => {
-    expect(() => initSchema(conn)).not.toThrow();
+  test('initSchema is idempotent — safe to call twice', async () => {
+    await initSchema(pool);
+    await expect(initSchema(pool)).resolves.not.toThrow();
   });
 });
