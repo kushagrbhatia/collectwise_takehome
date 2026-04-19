@@ -1,3 +1,4 @@
 node_modules/
 collectwise.db
 *.db
+.env
