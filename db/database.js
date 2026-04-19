@@ -10,9 +10,9 @@ function createPool() {
   return _pool;
 }
 
-function close() {
+async function close() {
   if (_pool) {
-    _pool.end();
+    await _pool.end();
     _pool = null;
   }
 }

@@ -1,15 +1,19 @@
 const db = require('../db/database');
 
 describe('database', () => {
-  afterEach(() => {
-    db.close();
+  afterEach(async () => {
+    await db.close();
   });
 
   test('createPool throws when DATABASE_URL is not set', () => {
     const original = process.env.DATABASE_URL;
     delete process.env.DATABASE_URL;
     expect(() => db.createPool()).toThrow('DATABASE_URL');
-    process.env.DATABASE_URL = original;
+    if (original === undefined) {
+      delete process.env.DATABASE_URL;
+    } else {
+      process.env.DATABASE_URL = original;
+    }
   });
 
   test('createPool returns a Pool when DATABASE_URL is set', () => {
@@ -20,9 +24,10 @@ describe('database', () => {
     expect(typeof pool.connect).toBe('function');
   });
 
-  test('close is safe to call multiple times', () => {
+  test('close is safe to call multiple times', async () => {
     process.env.DATABASE_URL = 'postgresql://fake:fake@localhost:5432/fake';
     db.createPool();
-    expect(() => { db.close(); db.close(); }).not.toThrow();
+    await db.close();
+    await db.close();
   });
 });
