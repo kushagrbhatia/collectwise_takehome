@@ -1,6 +1,3 @@
-const fs = require('fs');
-const path = require('path');
-const { parse } = require('csv-parse/sync');
 const { validateRow } = require('./validate');
 
 const BUSINESS_COLS = [
@@ -12,50 +9,18 @@ function hasChanged(existing, incoming) {
   return BUSINESS_COLS.some(col => {
     const a = existing[col] == null ? null : existing[col];
     const b = incoming[col] == null ? null : incoming[col];
-    // Compare as strings to handle numeric/text edge cases
     return String(a) !== String(b);
   });
 }
 
-function runIngestion(db, rows) {
+async function runIngestion(pool, rows) {
   const now = new Date().toISOString();
   const stats = { inserted: 0, updated: 0, skipped: 0, errored: 0 };
   const seenInFile = new Map();
 
-  const selectStmt = db.prepare(
-    'SELECT * FROM debtors WHERE account_number = ?'
-  );
-  const insertStmt = db.prepare(`
-    INSERT INTO debtors
-      (account_number, debtor_name, phone_number, balance, status, client_name,
-       entry_date, inbound, outbound, created_at, updated_at)
-    VALUES
-      (@account_number, @debtor_name, @phone_number, @balance, @status, @client_name,
-       @entry_date, @inbound, @outbound, @created_at, @updated_at)
-  `);
-  const archiveStmt = db.prepare(`
-    INSERT INTO archived_debtors
-      (account_number, debtor_name, phone_number, balance, status, client_name,
-       entry_date, inbound, outbound, created_at, updated_at, archived_at)
-    VALUES
-      (@account_number, @debtor_name, @phone_number, @balance, @status, @client_name,
-       @entry_date, @inbound, @outbound, @created_at, @updated_at, @archived_at)
-  `);
-  const updateStmt = db.prepare(`
-    UPDATE debtors
-    SET debtor_name = @debtor_name, phone_number = @phone_number, balance = @balance,
-        status = @status, client_name = @client_name, entry_date = @entry_date,
-        inbound = @inbound, outbound = @outbound, updated_at = @updated_at
-    WHERE account_number = @account_number
-  `);
-  const archiveAndUpdate = db.transaction((existing, parsed, now) => {
-    archiveStmt.run({ ...existing, archived_at: now });
-    updateStmt.run({ ...parsed, updated_at: now });
-  });
-
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const rowNum = i + 2; // row 1 is the header
+    const rowNum = i + 2;
 
     const rawAcct = row.account_number && row.account_number.trim();
     if (rawAcct) {
@@ -74,14 +39,52 @@ function runIngestion(db, rows) {
       continue;
     }
 
-    const existing = selectStmt.get(parsed.account_number);
+    const existing = (await pool.query(
+      'SELECT * FROM debtors WHERE account_number = $1',
+      [parsed.account_number]
+    )).rows[0];
 
     if (!existing) {
-      insertStmt.run({ ...parsed, created_at: now, updated_at: now });
+      await pool.query(
+        `INSERT INTO debtors
+           (account_number, debtor_name, phone_number, balance, status, client_name,
+            entry_date, inbound, outbound, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [parsed.account_number, parsed.debtor_name, parsed.phone_number, parsed.balance,
+         parsed.status, parsed.client_name, parsed.entry_date, parsed.inbound,
+         parsed.outbound, now, now]
+      );
       stats.inserted++;
     } else if (hasChanged(existing, parsed)) {
-      archiveAndUpdate(existing, parsed, now);
-      stats.updated++;
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `INSERT INTO archived_debtors
+             (account_number, debtor_name, phone_number, balance, status, client_name,
+              entry_date, inbound, outbound, created_at, updated_at, archived_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          [existing.account_number, existing.debtor_name, existing.phone_number,
+           existing.balance, existing.status, existing.client_name, existing.entry_date,
+           existing.inbound, existing.outbound, existing.created_at, existing.updated_at, now]
+        );
+        await client.query(
+          `UPDATE debtors
+           SET debtor_name=$1, phone_number=$2, balance=$3, status=$4, client_name=$5,
+               entry_date=$6, inbound=$7, outbound=$8, updated_at=$9
+           WHERE account_number=$10`,
+          [parsed.debtor_name, parsed.phone_number, parsed.balance, parsed.status,
+           parsed.client_name, parsed.entry_date, parsed.inbound, parsed.outbound,
+           now, parsed.account_number]
+        );
+        await client.query('COMMIT');
+        stats.updated++;
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
     } else {
       stats.skipped++;
     }
@@ -90,7 +93,11 @@ function runIngestion(db, rows) {
   return stats;
 }
 
-function main() {
+async function main() {
+  const fs = require('fs');
+  const path = require('path');
+  const { parse } = require('csv-parse/sync');
+
   const args = process.argv.slice(2);
   const fileIdx = args.indexOf('--file');
   const filePath = fileIdx !== -1 && args[fileIdx + 1]
@@ -102,23 +109,26 @@ function main() {
     process.exit(1);
   }
 
-  const dbModule = require('../db/database');
+  const { getPool } = require('../db/database');
   const initSchema = require('../db/schema');
 
-  const db = dbModule.open();
-  initSchema(db);
+  const pool = getPool();
+  await initSchema(pool);
 
   const content = fs.readFileSync(filePath, 'utf8');
   const rows = parse(content, { columns: true, skip_empty_lines: true });
 
-  const stats = runIngestion(db, rows);
+  const stats = await runIngestion(pool, rows);
   console.log(`Ingestion complete: ${stats.inserted} inserted, ${stats.updated} updated, ${stats.skipped} skipped, ${stats.errored} errored`);
 
-  dbModule.close();
+  await pool.end();
 }
 
 if (require.main === module) {
-  main();
+  main().catch(err => {
+    console.error(err);
+    process.exit(1);
+  });
 }
 
 module.exports = { runIngestion, hasChanged };

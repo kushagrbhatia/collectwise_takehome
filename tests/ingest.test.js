@@ -1,17 +1,23 @@
-const db = require('../db/database');
+const { newDb } = require('pg-mem');
 const initSchema = require('../db/schema');
 const { runIngestion } = require('../scripts/ingest');
 
-describe('runIngestion', () => {
-  let conn;
+function makePool() {
+  const mem = newDb();
+  const { Pool } = mem.adapters.createPg();
+  return new Pool();
+}
 
-  beforeEach(() => {
-    conn = db.open(':memory:');
-    initSchema(conn);
+describe('runIngestion', () => {
+  let pool;
+
+  beforeEach(async () => {
+    pool = makePool();
+    await initSchema(pool);
   });
 
-  afterEach(() => {
-    db.close();
+  afterEach(async () => {
+    await pool.end();
   });
 
   function makeRows(overrides = {}) {
@@ -28,13 +34,13 @@ describe('runIngestion', () => {
     }, overrides)];
   }
 
-  test('inserts a new record', () => {
-    const stats = runIngestion(conn, makeRows());
+  test('inserts a new record', async () => {
+    const stats = await runIngestion(pool, makeRows());
     expect(stats.inserted).toBe(1);
     expect(stats.updated).toBe(0);
     expect(stats.skipped).toBe(0);
     expect(stats.errored).toBe(0);
-    const row = conn.prepare('SELECT * FROM debtors WHERE account_number = ?').get('ACC001');
+    const row = (await pool.query('SELECT * FROM debtors WHERE account_number = $1', ['ACC001'])).rows[0];
     expect(row).toBeDefined();
     expect(row.debtor_name).toBe('John Doe');
     expect(row.balance).toBe(100);
@@ -42,71 +48,73 @@ describe('runIngestion', () => {
     expect(row.phone_number).toBe('555-1234');
   });
 
-  test('skips identical record on re-run', () => {
-    runIngestion(conn, makeRows());
-    const stats = runIngestion(conn, makeRows());
+  test('skips identical record on re-run', async () => {
+    await runIngestion(pool, makeRows());
+    const stats = await runIngestion(pool, makeRows());
     expect(stats.inserted).toBe(0);
     expect(stats.skipped).toBe(1);
-    expect(conn.prepare('SELECT COUNT(*) AS n FROM archived_debtors').get().n).toBe(0);
+    const count = (await pool.query('SELECT COUNT(*) AS n FROM archived_debtors')).rows[0].n;
+    expect(Number(count)).toBe(0);
   });
 
-  test('archives old record and updates when data changes', () => {
-    runIngestion(conn, makeRows());
-    const stats = runIngestion(conn, makeRows({ balance: '200.00' }));
+  test('archives old record and updates when data changes', async () => {
+    await runIngestion(pool, makeRows());
+    const stats = await runIngestion(pool, makeRows({ balance: '200.00' }));
     expect(stats.updated).toBe(1);
     expect(stats.inserted).toBe(0);
-    const current = conn.prepare('SELECT * FROM debtors WHERE account_number = ?').get('ACC001');
+    const current = (await pool.query('SELECT * FROM debtors WHERE account_number = $1', ['ACC001'])).rows[0];
     expect(current.balance).toBe(200);
-    const archived = conn.prepare('SELECT * FROM archived_debtors WHERE account_number = ?').all('ACC001');
+    const archived = (await pool.query('SELECT * FROM archived_debtors WHERE account_number = $1', ['ACC001'])).rows;
     expect(archived).toHaveLength(1);
     expect(archived[0].balance).toBe(100);
     expect(archived[0].archived_at).toBeDefined();
   });
 
-  test('skips row with missing account_number and increments errored', () => {
-    const stats = runIngestion(conn, makeRows({ account_number: '' }));
+  test('skips row with missing account_number and increments errored', async () => {
+    const stats = await runIngestion(pool, makeRows({ account_number: '' }));
     expect(stats.errored).toBe(1);
-    expect(conn.prepare('SELECT COUNT(*) AS n FROM debtors').get().n).toBe(0);
+    const count = (await pool.query('SELECT COUNT(*) AS n FROM debtors')).rows[0].n;
+    expect(Number(count)).toBe(0);
   });
 
-  test('skips row with non-numeric balance', () => {
-    const stats = runIngestion(conn, makeRows({ balance: 'bad' }));
+  test('skips row with non-numeric balance', async () => {
+    const stats = await runIngestion(pool, makeRows({ balance: 'bad' }));
     expect(stats.errored).toBe(1);
-    expect(conn.prepare('SELECT COUNT(*) AS n FROM debtors').get().n).toBe(0);
+    const count = (await pool.query('SELECT COUNT(*) AS n FROM debtors')).rows[0].n;
+    expect(Number(count)).toBe(0);
   });
 
-  test('inserts row with negative balance — warning only', () => {
-    const stats = runIngestion(conn, makeRows({ balance: '-50' }));
+  test('inserts row with negative balance — warning only', async () => {
+    const stats = await runIngestion(pool, makeRows({ balance: '-50' }));
     expect(stats.inserted).toBe(1);
     expect(stats.errored).toBe(0);
-    const row = conn.prepare('SELECT * FROM debtors WHERE account_number = ?').get('ACC001');
+    const row = (await pool.query('SELECT * FROM debtors WHERE account_number = $1', ['ACC001'])).rows[0];
     expect(row.balance).toBe(-50);
   });
 
-  test('last occurrence wins for intra-CSV duplicates', () => {
+  test('last occurrence wins for intra-CSV duplicates', async () => {
     const rows = [
       ...makeRows({ balance: '100' }),
       ...makeRows({ balance: '200' }),
     ];
-    const stats = runIngestion(conn, rows);
-    // First row inserted, second triggers update (balance changed)
+    const stats = await runIngestion(pool, rows);
     expect(stats.inserted).toBe(1);
     expect(stats.updated).toBe(1);
-    const row = conn.prepare('SELECT * FROM debtors WHERE account_number = ?').get('ACC001');
+    const row = (await pool.query('SELECT * FROM debtors WHERE account_number = $1', ['ACC001'])).rows[0];
     expect(row.balance).toBe(200);
   });
 
-  test('missing phone_number stored as null', () => {
-    runIngestion(conn, makeRows({ phone_number: '' }));
-    const row = conn.prepare('SELECT * FROM debtors WHERE account_number = ?').get('ACC001');
+  test('missing phone_number stored as null', async () => {
+    await runIngestion(pool, makeRows({ phone_number: '' }));
+    const row = (await pool.query('SELECT * FROM debtors WHERE account_number = $1', ['ACC001'])).rows[0];
     expect(row.phone_number).toBeNull();
   });
 
-  test('preserves created_at across updates', () => {
-    runIngestion(conn, makeRows());
-    const before = conn.prepare('SELECT created_at FROM debtors WHERE account_number = ?').get('ACC001');
-    runIngestion(conn, makeRows({ balance: '999' }));
-    const after = conn.prepare('SELECT created_at FROM debtors WHERE account_number = ?').get('ACC001');
+  test('preserves created_at across updates', async () => {
+    await runIngestion(pool, makeRows());
+    const before = (await pool.query('SELECT created_at FROM debtors WHERE account_number = $1', ['ACC001'])).rows[0];
+    await runIngestion(pool, makeRows({ balance: '999' }));
+    const after = (await pool.query('SELECT created_at FROM debtors WHERE account_number = $1', ['ACC001'])).rows[0];
     expect(before.created_at).toBe(after.created_at);
   });
 });
