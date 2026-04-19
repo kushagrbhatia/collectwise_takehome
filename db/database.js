@@ -1,23 +1,20 @@
-const Database = require('better-sqlite3');
-const path = require('path');
+const { Pool } = require('pg');
 
-let _db = null;
+let _pool = null;
 
-function open(dbPath) {
-  _db = new Database(dbPath || path.join(process.cwd(), 'collectwise.db'));
-  return _db;
-}
-
-function get() {
-  if (!_db) throw new Error('Database not open. Call open() first.');
-  return _db;
+function createPool() {
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL environment variable is not set');
+  }
+  _pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  return _pool;
 }
 
 function close() {
-  if (_db) {
-    _db.close();
-    _db = null;
+  if (_pool) {
+    _pool.end();
+    _pool = null;
   }
 }
 
-module.exports = { open, get, close };
+module.exports = { createPool, close };

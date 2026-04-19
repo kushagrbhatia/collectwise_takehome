@@ -5,25 +5,24 @@ describe('database', () => {
     db.close();
   });
 
-  test('open returns a working SQLite connection', () => {
-    const conn = db.open(':memory:');
-    expect(conn).toBeDefined();
-    const result = conn.prepare('SELECT 1 AS val').get();
-    expect(result.val).toBe(1);
+  test('createPool throws when DATABASE_URL is not set', () => {
+    const original = process.env.DATABASE_URL;
+    delete process.env.DATABASE_URL;
+    expect(() => db.createPool()).toThrow('DATABASE_URL');
+    process.env.DATABASE_URL = original;
   });
 
-  test('get returns the same connection after open', () => {
-    const conn = db.open(':memory:');
-    expect(db.get()).toBe(conn);
+  test('createPool returns a Pool when DATABASE_URL is set', () => {
+    process.env.DATABASE_URL = 'postgresql://fake:fake@localhost:5432/fake';
+    const pool = db.createPool();
+    expect(pool).toBeDefined();
+    expect(typeof pool.query).toBe('function');
+    expect(typeof pool.connect).toBe('function');
   });
 
-  test('get throws if not opened', () => {
-    expect(() => db.get()).toThrow('Database not open');
-  });
-
-  test('close cleans up so get throws afterward', () => {
-    db.open(':memory:');
-    db.close();
-    expect(() => db.get()).toThrow('Database not open');
+  test('close is safe to call multiple times', () => {
+    process.env.DATABASE_URL = 'postgresql://fake:fake@localhost:5432/fake';
+    db.createPool();
+    expect(() => { db.close(); db.close(); }).not.toThrow();
   });
 });
